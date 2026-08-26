@@ -4,6 +4,7 @@ import com.github.unclepomedev.blenderprobeforpycharm.BlenderProbeManager
 import com.github.unclepomedev.blenderprobeforpycharm.BlenderProbeUtils
 import com.github.unclepomedev.blenderprobeforpycharm.ScriptResourceUtils
 import com.github.unclepomedev.blenderprobeforpycharm.settings.BlenderSettings
+import com.intellij.execution.configuration.EnvironmentVariablesData
 import com.intellij.execution.DefaultExecutionResult
 import com.intellij.execution.ExecutionException
 import com.intellij.execution.ExecutionResult
@@ -33,6 +34,7 @@ class BlenderRunningState(
     var cachedBlenderPath: String? = null
     var cachedAddonName: String? = null
     var cachedSourceRoot: String? = null
+    var envData: EnvironmentVariablesData = EnvironmentVariablesData.DEFAULT
 
     companion object {
         internal fun buildParameters(useFactoryStartup: Boolean, scriptPath: String): List<String> = buildList {
@@ -43,6 +45,29 @@ class BlenderRunningState(
             add("1")
             add("-P")
             add(scriptPath)
+        }
+
+        /**
+         * Builds the environment for the Blender process. User-defined variables are
+         * applied first so the plugin's own variables always take precedence.
+         */
+        internal fun buildEnvironment(
+            envData: EnvironmentVariablesData,
+            sourceRoot: String,
+            addonName: String,
+            debugPort: Int?,
+            pydevdPath: String?,
+        ): LinkedHashMap<String, String> {
+            val env = LinkedHashMap<String, String>()
+            env.putAll(envData.envs)
+            env["BLENDER_PROBE_PROJECT_ROOT"] = sourceRoot
+            env["BLENDER_PROBE_ADDON_NAME"] = addonName
+            env["PYTHONUNBUFFERED"] = "1"
+            if (debugPort != null && pydevdPath != null) {
+                env["BLENDER_PROBE_DEBUG_PORT"] = debugPort.toString()
+                env["BLENDER_PROBE_PYDEVD_PATH"] = pydevdPath
+            }
+            return env
         }
     }
 
@@ -99,16 +124,15 @@ class BlenderRunningState(
             .withParameters(buildParameters(BlenderSettings.getInstance(project).state.useFactoryStartup, scriptPath))
             .withCharset(StandardCharsets.UTF_8)
             .withWorkDirectory(projectPath)
-            .withEnvironment("BLENDER_PROBE_PROJECT_ROOT", sourceRoot)
-            .withEnvironment("BLENDER_PROBE_ADDON_NAME", addonName)
-            .withEnvironment("PYTHONUNBUFFERED", "1")
+            .withEnvironment(buildEnvironment(envData, sourceRoot, addonName, debugPort, pydevdPath))
 
-        val port = debugPort
-        val pyPath = pydevdPath
-        if (port != null && pyPath != null) {
-            cmd.withEnvironment("BLENDER_PROBE_DEBUG_PORT", port.toString())
-            cmd.withEnvironment("BLENDER_PROBE_PYDEVD_PATH", pyPath)
-        }
+        cmd.withParentEnvironmentType(
+            if (envData.isPassParentEnvs) {
+                GeneralCommandLine.ParentEnvironmentType.CONSOLE
+            } else {
+                GeneralCommandLine.ParentEnvironmentType.NONE
+            }
+        )
         return cmd
     }
 
